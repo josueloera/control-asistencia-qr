@@ -1,0 +1,285 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Generador de Licencias - Control de Asistencia y Trabajos QR</title>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&display=swap');
+
+        :root {
+            --primary: #4F46E5;
+            --primary-hover: #4338CA;
+            --success: #10B981;
+            --dark: #0F172A;
+            --card: #1E293B;
+            --border: #334155;
+            --text: #F8FAFC;
+        }
+
+        body {
+            margin: 0;
+            padding: 0;
+            font-family: 'Inter', sans-serif;
+            background: linear-gradient(135deg, #0f172a 0%, #1e1b4b 100%);
+            color: var(--text);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+        }
+
+        .container {
+            background: rgba(30, 41, 59, 0.85);
+            backdrop-filter: blur(12px);
+            border: 1px solid var(--border);
+            border-radius: 24px;
+            padding: 40px;
+            width: 100%;
+            max-width: 480px;
+            box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.6);
+            text-align: center;
+        }
+
+        .badge {
+            display: inline-block;
+            background: #eab308;
+            color: #422006;
+            font-size: 0.75rem;
+            font-weight: 800;
+            padding: 4px 12px;
+            border-radius: 9999px;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            margin-bottom: 15px;
+        }
+
+        h1 {
+            margin: 0 0 10px 0;
+            font-size: 1.5rem;
+            font-weight: 800;
+            background: linear-gradient(to right, #818cf8, #c084fc);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        p.subtitle {
+            font-size: 0.85rem;
+            color: #94a3b8;
+            margin-bottom: 30px;
+        }
+
+        .input-group {
+            margin-bottom: 22px;
+            text-align: left;
+        }
+
+        .input-group label {
+            display: block;
+            margin-bottom: 8px;
+            font-size: 0.85rem;
+            color: #cbd5e1;
+            font-weight: 600;
+        }
+
+        input {
+            width: 100%;
+            padding: 14px 16px;
+            background: rgba(15, 23, 42, 0.7);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            color: #fff;
+            font-size: 1rem;
+            font-family: 'Inter', sans-serif;
+            box-sizing: border-box;
+            outline: none;
+            transition: all 0.2s ease;
+        }
+
+        input:focus {
+            border-color: #818cf8;
+            box-shadow: 0 0 0 3px rgba(129, 140, 248, 0.25);
+        }
+
+        .code-input {
+            text-transform: uppercase;
+            text-align: center;
+            font-weight: 700;
+            letter-spacing: 1.5px;
+        }
+
+        input:read-only {
+            background: rgba(15, 23, 42, 0.5);
+            color: #4ade80;
+            font-weight: 800;
+            text-align: center;
+            letter-spacing: 2px;
+            font-size: 1.15rem;
+            cursor: pointer;
+        }
+
+        button.btn-generate {
+            width: 100%;
+            padding: 14px;
+            background: linear-gradient(135deg, #4f46e5, #7c3aed);
+            border: none;
+            border-radius: 12px;
+            color: #fff;
+            font-size: 1rem;
+            font-weight: 700;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            margin-bottom: 25px;
+            box-shadow: 0 10px 20px -5px rgba(79, 70, 229, 0.5);
+        }
+
+        button.btn-generate:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 15px 25px -5px rgba(79, 70, 229, 0.7);
+        }
+
+        button.btn-copy {
+            width: 100%;
+            padding: 12px;
+            background: var(--success);
+            border: none;
+            border-radius: 10px;
+            color: #fff;
+            font-size: 0.95rem;
+            font-weight: 700;
+            cursor: pointer;
+            margin-top: 10px;
+            transition: background 0.2s;
+        }
+
+        button.btn-copy:hover {
+            background: #059669;
+        }
+
+        .result-box {
+            display: none;
+            margin-top: 20px;
+            padding: 20px;
+            background: rgba(16, 185, 129, 0.1);
+            border: 1px solid rgba(16, 185, 129, 0.3);
+            border-radius: 16px;
+        }
+
+        .result-box.active {
+            display: block;
+        }
+
+        .notification {
+            position: fixed;
+            top: 20px;
+            left: 50%;
+            transform: translateX(-50%) translateY(-100px);
+            background: #10b981;
+            color: white;
+            padding: 12px 24px;
+            border-radius: 12px;
+            font-weight: 700;
+            font-size: 0.9rem;
+            transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            box-shadow: 0 10px 25px rgba(0, 0, 0, 0.3);
+            z-index: 100;
+        }
+
+        .notification.show {
+            transform: translateX(-50%) translateY(0);
+        }
+    </style>
+</head>
+<body>
+
+    <div class="notification" id="notification">¡Clave de activación copiada al portapapeles!</div>
+
+    <div class="container">
+        <span class="badge">EXCLUSIVO PROGRAMA QR</span>
+        <h1>Generador de Licencias QR</h1>
+        <p class="subtitle">Asistencia y Trabajos por Código QR (Clave Válida para 1 solo Equipo)</p>
+
+        <div class="input-group">
+            <label for="machine_id">Código de Equipo del Cliente:</label>
+            <input type="text" id="machine_id" class="code-input" placeholder="Ej. QR-A1B2-C3D4" autocomplete="off">
+        </div>
+
+        <button class="btn-generate" onclick="generateSerial()">🔐 GENERAR CLAVE DE ACTIVACIÓN</button>
+
+        <div class="result-box" id="resultBox">
+            <div class="input-group" style="margin-bottom: 10px;">
+                <label style="color: #4ade80; text-align: center;">Clave Generada (Válida para este equipo):</label>
+                <input type="text" id="serial_output" readonly onclick="copyToClipboard()">
+            </div>
+            <button class="btn-copy" onclick="copyToClipboard()">📋 Copiar Clave</button>
+        </div>
+    </div>
+
+    <script>
+        // Secret Key exclusiva para la aplicación Pase de Asistencia y Trabajos QR
+        const SECRET_KEY = "QR_ASISTENCIA_TRABAJOS_2026_MASTER_SECRET_KEY";
+
+        async function generateSerial() {
+            const machineIdInput = document.getElementById('machine_id');
+            const resultBox = document.getElementById('resultBox');
+            const serialOutput = document.getElementById('serial_output');
+            
+            let machineId = machineIdInput.value.trim();
+            
+            if (!machineId) {
+                alert("Por favor ingresa el Código de Equipo del cliente.");
+                machineIdInput.focus();
+                return;
+            }
+            
+            // Normalizar código eliminando guiones y convirtiendo a mayúsculas
+            let cleanMachineId = machineId.replace(/-/g, "").toUpperCase();
+            let rawString = `${cleanMachineId}_${SECRET_KEY}`;
+            
+            try {
+                // Calcular Hash SHA-256
+                const msgBuffer = new TextEncoder().encode(rawString);
+                const hashBuffer = await crypto.subtle.digest('SHA-256', msgBuffer);
+                
+                // Convertir buffer a Hexadecimal en mayúsculas
+                const hashArray = Array.from(new Uint8Array(hashBuffer));
+                const hashHex = hashArray.map(b => b.toString(16).padStart(2, '0')).join('').toUpperCase();
+                
+                // Extraer los primeros 16 caracteres y formatear en bloques de 4 (XXXX-XXXX-XXXX-XXXX)
+                let serial = hashHex.substring(0, 16);
+                let formattedSerial = `${serial.substring(0,4)}-${serial.substring(4,8)}-${serial.substring(8,12)}-${serial.substring(12,16)}`;
+                
+                serialOutput.value = formattedSerial;
+                resultBox.classList.add('active');
+
+            } catch (error) {
+                console.error("Error generando la clave:", error);
+                alert("Error al generar la clave de activación.");
+            }
+        }
+
+        function copyToClipboard() {
+            const serialOutput = document.getElementById('serial_output');
+            if (serialOutput.value) {
+                navigator.clipboard.writeText(serialOutput.value).then(() => {
+                    showNotification();
+                });
+            }
+        }
+
+        function showNotification() {
+            const notif = document.getElementById('notification');
+            notif.classList.add('show');
+            setTimeout(() => {
+                notif.classList.remove('show');
+            }, 2500);
+        }
+
+        document.getElementById('machine_id').addEventListener('keypress', function (e) {
+            if (e.key === 'Enter') {
+                generateSerial();
+            }
+        });
+    </script>
+</body>
+</html>
