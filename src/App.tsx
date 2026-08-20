@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
+import { QRCodeSVG } from 'qrcode.react';
 import {
   QrCode,
   Camera,
@@ -148,6 +149,7 @@ export default function App() {
     // Show modal on start if not activated
     return !localStorage.getItem('sep_qr_license_activated');
   });
+  const [showPairingModal, setShowPairingModal] = useState(false);
 
   const [licenseInputKey, setLicenseInputKey] = useState('');
   const [licenseError, setLicenseError] = useState('');
@@ -263,6 +265,30 @@ export default function App() {
   useEffect(() => {
     handleCodeScannedRef.current = handleCodeScanned;
   });
+
+  const [localIp, setLocalIp] = useState('');
+
+  useEffect(() => {
+    try {
+      if ((window as any).require) {
+        const { ipcRenderer } = (window as any).require('electron');
+        ipcRenderer.invoke('get-local-ip').then((ip: string) => setLocalIp(ip));
+        
+        const handleIpcScan = (event: any, data: string) => {
+          if (handleCodeScannedRef.current) {
+            handleCodeScannedRef.current(data);
+          }
+        };
+        ipcRenderer.on('qr-scanned', handleIpcScan);
+        
+        return () => {
+          ipcRenderer.removeListener('qr-scanned', handleIpcScan);
+        };
+      }
+    } catch (err) {
+      console.log('Not running in electron', err);
+    }
+  }, []);
 
   const html5QrCodeRef = useRef<any>(null);
 
@@ -742,6 +768,16 @@ export default function App() {
                   className="bg-transparent text-white text-xs font-medium focus:outline-none px-2 py-1 rounded cursor-pointer"
                 />
               </div>
+
+              <button
+                type="button"
+                onClick={() => setShowPairingModal(true)}
+                className="flex items-center space-x-1.5 bg-blue-500 hover:bg-blue-400 text-white px-3 py-1.5 rounded-xl text-xs font-bold transition-all shadow-md"
+                title="Vincular celular como escáner"
+              >
+                <Zap className="w-4 h-4" />
+                <span className="hidden sm:inline">Vincular Celular</span>
+              </button>
 
               <button
                 type="button"
@@ -2115,6 +2151,46 @@ export default function App() {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* Pairing Modal */}
+      {showPairingModal && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-3xl shadow-2xl max-w-sm w-full p-6 text-center animate-scaleIn">
+            <div className="flex justify-between items-center mb-4">
+              <h3 className="text-xl font-black text-slate-800 flex items-center">
+                <Zap className="w-6 h-6 mr-2 text-indigo-500" /> Vincular Celular
+              </h3>
+              <button onClick={() => setShowPairingModal(false)} className="text-slate-400 hover:text-rose-500">
+                <X className="w-6 h-6" />
+              </button>
+            </div>
+            
+            <p className="text-sm text-slate-600 mb-6">
+              Abre la aplicación móvil de Escáner QR e ingresa la siguiente IP, o escanea el código para conectarte automáticamente.
+            </p>
+
+            <div className="flex justify-center bg-white p-4 border-2 border-indigo-100 rounded-2xl mb-4 shadow-sm inline-block mx-auto">
+              {localIp ? (
+                <QRCodeSVG value={`ws://${localIp}:3000`} size={200} level="H" />
+              ) : (
+                <div className="w-[200px] h-[200px] flex items-center justify-center text-slate-400 font-bold">Obteniendo IP...</div>
+              )}
+            </div>
+
+            <div className="bg-slate-100 p-3 rounded-xl border border-slate-200">
+              <p className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">Dirección de Conexión</p>
+              <p className="text-lg font-black text-indigo-700 tracking-widest">{localIp || '---.---.---.---'}</p>
+            </div>
+
+            <button
+              onClick={() => setShowPairingModal(false)}
+              className="mt-6 w-full bg-slate-800 text-white font-bold py-3 rounded-xl hover:bg-slate-700"
+            >
+              Cerrar
+            </button>
           </div>
         </div>
       )}
