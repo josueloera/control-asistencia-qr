@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
+import * as XLSX from 'xlsx';
 import { QRCodeSVG } from 'qrcode.react';
 import {
   QrCode,
@@ -666,6 +667,60 @@ export default function App() {
     }));
   };
 
+  const exportAttendanceToExcel = () => {
+    const data = students.map(st => {
+      const row: any = {
+        'No. Lista': st.number,
+        'Nombre': st.name,
+        'Grupo': st.group,
+      };
+      let presentCount = 0;
+      allAttendanceDates.forEach(date => {
+        const isPresent = (attendance[date] || []).includes(st.id);
+        row[date] = isPresent ? '✔ Presente' : '✘ Falta';
+        if (isPresent) presentCount++;
+      });
+      const totalDays = allAttendanceDates.length || 1;
+      row['% Asistencia'] = `${Math.round((presentCount / totalDays) * 100)}%`;
+      return row;
+    });
+
+    const worksheet = XLSX.utils.json_to_sheet(data);
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, worksheet, "Asistencia");
+    XLSX.writeFile(workbook, `Asistencia_SEP_${selectedDate}.xlsx`);
+  };
+
+  const exportWorkToExcel = () => {
+    const data = students.map(st => {
+      const row: any = {
+        'No. Lista': st.number,
+        'Nombre': st.name,
+        'Grupo': st.group,
+      };
+      
+      let totalSubmitted = 0;
+      
+      filteredAssignments.forEach(asg => {
+        const hasSubmitted = (submissions[asg.id] || []).includes(st.id);
+        row[`${asg.subject}: ${asg.title}`] = hasSubmitted ? '✔ Entregado' : '✘ Pendiente';
+        if (hasSubmitted) totalSubmitted++;
+      });
+
+      const totalAssignments = filteredAssignments.length || 1;
+      row['% Entregas'] = `${Math.round((totalSubmitted / totalAssignments) * 100)}%`;
+      
+      return row;
+    });
+
+    const worksheet = XLSX.utils.json_to_sheet(data);
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, worksheet, "Trabajos");
+    
+    const subjectPrefix = selectedSubjectFilter === 'ALL' ? 'General' : selectedSubjectFilter;
+    XLSX.writeFile(workbook, `Trabajos_${subjectPrefix}_${selectedDate}.xlsx`);
+  };
+
   return (
     <div className="min-h-screen bg-slate-50 text-slate-800 font-sans flex flex-col">
       {/* Global CSS Style tag for exact CR80 Standard ID Card print layout (5.4 cm x 8.56 cm) */}
@@ -1141,12 +1196,23 @@ export default function App() {
               </div>
 
               {/* SEP Legend */}
-              <div className="flex flex-wrap gap-2 text-[10px]">
-                {Object.entries(CALENDAR_TYPES).map(([key, val]) => (
-                  <span key={key} className={`px-2 py-1 rounded border font-semibold ${val.color}`}>
-                    {val.label}
-                  </span>
-                ))}
+              <div className="flex flex-col items-end gap-2">
+                <button
+                  type="button"
+                  onClick={exportAttendanceToExcel}
+                  className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs px-3.5 py-2.5 rounded-xl flex items-center space-x-1.5 shadow-sm"
+                  title="Exportar tabla actual a Excel"
+                >
+                  <FileSpreadsheet className="w-4 h-4" />
+                  <span>Exportar a Excel</span>
+                </button>
+                <div className="flex flex-wrap gap-2 text-[10px] justify-end">
+                  {Object.entries(CALENDAR_TYPES).map(([key, val]) => (
+                    <span key={key} className={`px-2 py-1 rounded border font-semibold ${val.color}`}>
+                      {val.label}
+                    </span>
+                  ))}
+                </div>
               </div>
             </div>
 
@@ -1247,6 +1313,15 @@ export default function App() {
               <div className="flex flex-wrap sm:flex-nowrap gap-2 w-full md:w-auto items-center">
                 <button
                   type="button"
+                  onClick={exportWorkToExcel}
+                  className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs px-3.5 py-2.5 rounded-xl flex items-center space-x-1.5 shadow-sm"
+                  title="Exportar trabajos a Excel"
+                >
+                  <FileSpreadsheet className="w-4 h-4" />
+                  <span className="hidden sm:inline">Exportar a Excel</span>
+                </button>
+                <button
+                  type="button"
                   onClick={() => setShowSubjectsModal(true)}
                   className="bg-slate-100 text-slate-700 font-bold text-xs px-3.5 py-2.5 rounded-xl border border-slate-300 hover:bg-slate-200 flex items-center space-x-1.5 shrink-0 shadow-sm"
                   title="Administrar o eliminar materias creadas"
@@ -1254,6 +1329,7 @@ export default function App() {
                   <Sliders className="w-4 h-4 text-amber-600" />
                   <span>Gestionar Materias</span>
                 </button>
+
 
                 <form
                   onSubmit={handleCreateAssignmentSubmit}
