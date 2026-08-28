@@ -30,22 +30,37 @@ function createWindow() {
   });
 
   // Set up WebSocket server
-  const wss = new WebSocketServer({ port: 3000 });
-  wss.on('connection', function connection(ws) {
-    ws.on('message', function message(data) {
-      console.log('Recibido desde celular: %s', data);
-      win.webContents.send('qr-scanned', data.toString());
+  try {
+    const wss = new WebSocketServer({ port: 3000 });
+    wss.on('connection', function connection(ws) {
+      ws.on('message', function message(data) {
+        console.log('Recibido desde celular: %s', data);
+        if (win && !win.isDestroyed()) {
+          win.webContents.send('qr-scanned', data.toString());
+        }
+      });
     });
-  });
+  } catch (err) {
+    console.error("WebSocket server error:", err);
+  }
 
   ipcMain.handle('get-local-ip', () => getLocalIp());
 
-  let distPath = path.join(__dirname, '..', 'dist', 'index.html');
-  if (!fs.existsSync(distPath)) {
-    distPath = path.join(app.getAppPath(), 'dist', 'index.html');
+  // Determine path to dist/index.html
+  const possiblePaths = [
+    path.join(__dirname, '..', 'dist', 'index.html'),
+    path.join(app.getAppPath(), 'dist', 'index.html')
+  ];
+
+  let targetPath = possiblePaths[0];
+  for (const p of possiblePaths) {
+    if (fs.existsSync(p)) {
+      targetPath = p;
+      break;
+    }
   }
 
-  win.loadFile(distPath).catch(err => {
+  win.loadFile(targetPath).catch(err => {
     console.error("Error loading HTML in Electron:", err);
   });
 }

@@ -35,6 +35,7 @@
     "appId": "com.planificador.asistenciaqr",
     "productName": "Control Asistencia y Trabajos QR",
     "electronVersion": "33.2.1",
+    "asar": false,
     "files": [
       "dist/**/*",
       "electron/**/*"
