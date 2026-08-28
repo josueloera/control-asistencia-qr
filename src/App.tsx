@@ -201,6 +201,17 @@ export default function App() {
     };
   });
 
+  // Grades: { [assignmentId]: { [studentId]: gradeNumber } }
+  const [grades, setGrades] = useState<Record<string, Record<string, number>>>(() => {
+    const saved = localStorage.getItem('sep_qr_grades');
+    return saved ? JSON.parse(saved) : {
+      'ASG-1': { 'ALU-101': 10, 'ALU-102': 9 }
+    };
+  });
+
+  const [selectedWorkGrade, setSelectedWorkGrade] = useState<number>(10);
+  const [gradeModalCell, setGradeModalCell] = useState<{ studentId: string; assignmentId: string; studentName: string; taskTitle: string } | null>(null);
+
   const [selectedAssignmentId, setSelectedAssignmentId] = useState('');
   const [selectedSubjectFilter, setSelectedSubjectFilter] = useState('ALL');
   const [showSubjectsModal, setShowSubjectsModal] = useState(false);
@@ -252,6 +263,10 @@ export default function App() {
   useEffect(() => {
     localStorage.setItem('sep_qr_submissions', JSON.stringify(submissions));
   }, [submissions]);
+
+  useEffect(() => {
+    localStorage.setItem('sep_qr_grades', JSON.stringify(grades));
+  }, [grades]);
 
   useEffect(() => {
     if (!(window as any).Html5Qrcode) {
@@ -409,14 +424,46 @@ export default function App() {
   const lastScanDebounceRef = useRef({ code: '', time: 0 });
 
   const handleCodeScanned = (scannedCode: string) => {
-    const cleanCode = scannedCode.trim().toUpperCase();
-    const now = Date.now();
+    const rawInput = scannedCode.trim();
+    let cleanCode = rawInput.toUpperCase();
+    let assignedGrade = selectedWorkGrade || 10;
 
-    // Prevent scanning the exact same code multiple times within 3 seconds
-    if (lastScanDebounceRef.current.code === cleanCode && (now - lastScanDebounceRef.current.time) < 3000) {
+    // Parse grade if mobile or scanner sends "ALU-101:8" or "ALU-101|9" or JSON
+    if (rawInput.includes(':')) {
+      const parts = rawInput.split(':');
+      cleanCode = parts[0].trim().toUpperCase();
+      const parsedG = parseInt(parts[1].trim(), 10);
+      if (!isNaN(parsedG) && parsedG >= 5 && parsedG <= 10) {
+        assignedGrade = parsedG;
+      }
+    } else if (rawInput.includes('|')) {
+      const parts = rawInput.split('|');
+      cleanCode = parts[0].trim().toUpperCase();
+      const parsedG = parseInt(parts[1].trim(), 10);
+      if (!isNaN(parsedG) && parsedG >= 5 && parsedG <= 10) {
+        assignedGrade = parsedG;
+      }
+    } else if (rawInput.startsWith('{')) {
+      try {
+        const obj = JSON.parse(rawInput);
+        if (obj.code || obj.id || obj.studentId) {
+          cleanCode = (obj.code || obj.id || obj.studentId).toString().trim().toUpperCase();
+        }
+        if (obj.grade) {
+          const parsedG = parseInt(obj.grade, 10);
+          if (!isNaN(parsedG) && parsedG >= 5 && parsedG <= 10) assignedGrade = parsedG;
+        }
+      } catch (e) {}
+    }
+
+    const now = Date.now();
+    const debounceKey = `${cleanCode}:${assignedGrade}`;
+
+    // Prevent scanning the exact same code with same grade multiple times within 2 seconds
+    if (lastScanDebounceRef.current.code === debounceKey && (now - lastScanDebounceRef.current.time) < 2000) {
       return;
     }
-    lastScanDebounceRef.current = { code: cleanCode, time: now };
+    lastScanDebounceRef.current = { code: debounceKey, time: now };
 
     const student = students.find(s => s.id.toUpperCase() === cleanCode || s.name.toLowerCase().includes(cleanCode.toLowerCase()));
 
@@ -476,37 +523,32 @@ export default function App() {
         return;
       }
 
-      const taskSubmissions = submissions[selectedAssignmentId] || [];
-      const alreadySubmitted = taskSubmissions.includes(student.id);
+      if (audioEnabled) playBeep(1000, 0.2);
 
-      if (!alreadySubmitted) {
-        if (audioEnabled) playBeep(1000, 0.2);
-        setSubmissions({
-          ...submissions,
-          [selectedAssignmentId]: [...taskSubmissions, student.id]
-        });
+      setSubmissions(prev => ({
+        ...prev,
+        [selectedAssignmentId]: Array.from(new Set([...(prev[selectedAssignmentId] || []), student.id]))
+      }));
 
-        const currentTask = assignments.find(a => a.id === selectedAssignmentId);
-        const scanEntry = {
-          success: true,
-          type: 'Trabajo',
-          student,
-          taskName: currentTask ? currentTask.title : 'Trabajo Diario',
-          message: '¡Trabajo Revisado y Registrado!',
-          time: new Date().toLocaleTimeString()
-        };
-        setLastScanResult(scanEntry);
-        setScanHistory(prev => [scanEntry, ...prev.slice(0, 14)]);
-      } else {
-        if (audioEnabled) playBeep(600, 0.2);
-        setLastScanResult({
-          success: true,
-          type: 'Trabajo Repetido',
-          student,
-          message: 'Este alumno ya tenía este trabajo entregado hoy',
-          time: new Date().toLocaleTimeString()
-        });
-      }
+      setGrades(prev => ({
+        ...prev,
+        [selectedAssignmentId]: {
+          ...(prev[selectedAssignmentId] || {}),
+          [student.id]: assignedGrade
+        }
+      }));
+
+      const currentTask = assignments.find(a => a.id === selectedAssignmentId);
+      const scanEntry = {
+        success: true,
+        type: 'Trabajo',
+        student,
+        taskName: currentTask ? currentTask.title : 'Trabajo Diario',
+        message: `¡Trabajo Registrado con Calificación ${assignedGrade}!`,
+        time: new Date().toLocaleTimeString()
+      };
+      setLastScanResult(scanEntry);
+      setScanHistory(prev => [scanEntry, ...prev.slice(0, 14)]);
     }
   };
 
@@ -699,26 +741,39 @@ export default function App() {
         'Grupo': st.group,
       };
       
-      let totalSubmitted = 0;
+      let sumGrades = 0;
+      let countGraded = 0;
       
       filteredAssignments.forEach(asg => {
         const hasSubmitted = (submissions[asg.id] || []).includes(st.id);
-        row[`${asg.subject}: ${asg.title}`] = hasSubmitted ? '✔ Entregado' : '✘ Pendiente';
-        if (hasSubmitted) totalSubmitted++;
+        const gradeVal = grades[asg.id]?.[st.id];
+        
+        if (hasSubmitted) {
+          const finalGrade = gradeVal !== undefined ? gradeVal : 10;
+          row[`[${asg.subject}] ${asg.title}`] = finalGrade;
+          sumGrades += finalGrade;
+          countGraded++;
+        } else {
+          row[`[${asg.subject}] ${asg.title}`] = 'Pendiente';
+        }
       });
 
+      const avgGrade = countGraded > 0 ? (sumGrades / countGraded).toFixed(1) : 'N/A';
       const totalAssignments = filteredAssignments.length || 1;
-      row['% Entregas'] = `${Math.round((totalSubmitted / totalAssignments) * 100)}%`;
+      const pct = Math.round((countGraded / totalAssignments) * 100);
+
+      row['Promedio Calificación'] = countGraded > 0 ? parseFloat(avgGrade) : 'N/A';
+      row['% Entregas'] = `${pct}%`;
       
       return row;
     });
 
     const worksheet = XLSX.utils.json_to_sheet(data);
     const workbook = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(workbook, worksheet, "Trabajos");
+    XLSX.utils.book_append_sheet(workbook, worksheet, "Calificaciones Trabajos");
     
     const subjectPrefix = selectedSubjectFilter === 'ALL' ? 'General' : selectedSubjectFilter;
-    XLSX.writeFile(workbook, `Trabajos_${subjectPrefix}_${selectedDate}.xlsx`);
+    XLSX.writeFile(workbook, `Calificaciones_Trabajos_${subjectPrefix}_${selectedDate}.xlsx`);
   };
 
   return (
@@ -919,22 +974,42 @@ export default function App() {
                 </div>
               </div>
 
-              {/* Work task selection dropdown when in 'work' mode */}
+              {/* Work task selection & Grade Selector when in 'work' mode */}
               {scanMode === 'work' && (
-                <div className="flex items-center space-x-2 w-full md:w-auto">
-                  <label className="text-xs font-semibold text-slate-500 whitespace-nowrap">Trabajo Actual:</label>
-                  <select
-                    value={selectedAssignmentId}
-                    onChange={(e) => setSelectedAssignmentId(e.target.value)}
-                    className="bg-amber-50 border border-amber-300 text-amber-900 font-medium text-xs rounded-lg p-2.5 focus:ring-2 focus:ring-amber-500 w-full md:w-64"
-                  >
-                    <option value="">-- Selecciona Trabajo --</option>
-                    {assignments.filter(a => a.date === selectedDate).map(asg => (
-                      <option key={asg.id} value={asg.id}>
-                        [{asg.subject}] {asg.title}
-                      </option>
+                <div className="flex flex-wrap items-center gap-3 w-full md:w-auto">
+                  <div className="flex items-center space-x-2">
+                    <label className="text-xs font-semibold text-slate-500 whitespace-nowrap">Trabajo Actual:</label>
+                    <select
+                      value={selectedAssignmentId}
+                      onChange={(e) => setSelectedAssignmentId(e.target.value)}
+                      className="bg-amber-50 border border-amber-300 text-amber-900 font-medium text-xs rounded-lg p-2.5 focus:ring-2 focus:ring-amber-500 w-full md:w-56"
+                    >
+                      <option value="">-- Selecciona Trabajo --</option>
+                      {assignments.filter(a => a.date === selectedDate).map(asg => (
+                        <option key={asg.id} value={asg.id}>
+                          [{asg.subject}] {asg.title}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div className="flex items-center space-x-1.5 bg-amber-50 p-1.5 rounded-xl border border-amber-200">
+                    <span className="text-[11px] font-bold text-amber-900 mr-1">Calificación:</span>
+                    {[5, 6, 7, 8, 9, 10].map(g => (
+                      <button
+                        type="button"
+                        key={g}
+                        onClick={() => setSelectedWorkGrade(g)}
+                        className={`px-2.5 py-1 rounded-lg text-xs font-black transition-all ${
+                          selectedWorkGrade === g
+                            ? 'bg-amber-600 text-white shadow scale-105'
+                            : 'bg-white text-slate-700 hover:bg-amber-100 border border-slate-200'
+                        }`}
+                      >
+                        {g}
+                      </button>
                     ))}
-                  </select>
+                  </div>
                 </div>
               )}
             </div>
@@ -1116,7 +1191,7 @@ export default function App() {
                 className="bg-indigo-600 hover:bg-indigo-700 text-white font-bold px-5 py-2.5 rounded-xl text-xs flex items-center space-x-2 shadow"
               >
                 <Printer className="w-4 h-4" />
-                <span>Imprimir Gafetes (PDF)</span>
+                <span>Imprimir Gafetes</span>
               </button>
             </div>
 
@@ -1516,20 +1591,33 @@ export default function App() {
                             <span className="truncate">{st.name}</span>
                           </td>
 
-                          {/* Assignments Status Cells */}
+                          {/* Assignments Status & Grade Cells */}
                           {filteredAssignments.map(asg => {
                             const hasSubmitted = (submissions[asg.id] || []).includes(st.id);
+                            const gradeVal = grades[asg.id]?.[st.id];
+
                             return (
                               <td
                                 key={asg.id}
-                                onClick={() => toggleSubmissionCell(st.id, asg.id)}
-                                className="p-3 text-center border-r border-slate-200 cursor-pointer hover:bg-amber-50/50 transition-colors select-none"
-                                title={`Haz clic para cambiar estatus de "${asg.title}"`}
+                                onClick={() => setGradeModalCell({
+                                  studentId: st.id,
+                                  assignmentId: asg.id,
+                                  studentName: st.name,
+                                  taskTitle: `${asg.subject} - ${asg.title}`
+                                })}
+                                className="p-3 text-center border-r border-slate-200 cursor-pointer hover:bg-amber-50/70 transition-colors select-none"
+                                title={`Haz clic para cambiar calificación o estatus de "${asg.title}"`}
                               >
                                 {hasSubmitted ? (
-                                  <span className="inline-flex items-center space-x-1 bg-emerald-100 text-emerald-800 font-bold px-2.5 py-1 rounded-full shadow-sm">
+                                  <span className={`inline-flex items-center space-x-1 font-black text-xs px-2.5 py-1 rounded-full shadow-sm ${
+                                    (gradeVal ?? 10) >= 9 
+                                      ? 'bg-emerald-600 text-white' 
+                                      : (gradeVal ?? 10) >= 7 
+                                      ? 'bg-amber-500 text-white' 
+                                      : 'bg-rose-600 text-white'
+                                  }`}>
                                     <CheckCircle2 className="w-3.5 h-3.5" />
-                                    <span>Entregado</span>
+                                    <span>Nota: {gradeVal !== undefined ? gradeVal : 10}</span>
                                   </span>
                                 ) : (
                                   <span className="inline-flex items-center space-x-1 bg-slate-100 text-slate-400 font-medium px-2 py-0.5 rounded-full hover:bg-amber-100 hover:text-amber-800">
@@ -1540,24 +1628,32 @@ export default function App() {
                             );
                           })}
 
-                          {/* Subject-Specific Averages Columns */}
+                          {/* Subject-Specific Grade Averages Columns */}
                           {selectedSubjectFilter === 'ALL' ? (
                             uniqueAssignmentSubjects.map(subj => {
                               const subjAssignments = assignments.filter(a => a.subject === subj);
                               const subjCount = subjAssignments.length || 1;
-                              const studentSubjSubmitted = subjAssignments.filter(a => (submissions[a.id] || []).includes(st.id)).length;
-                              const subjAvg = Math.round((studentSubjSubmitted / subjCount) * 100);
+                              const studentSubjSubmitted = subjAssignments.filter(a => (submissions[a.id] || []).includes(st.id));
+                              const subjGrades = studentSubjSubmitted.map(a => grades[a.id]?.[st.id] ?? 10);
+                              const sumG = subjGrades.reduce((acc, curr) => acc + curr, 0);
+                              const avgG = studentSubjSubmitted.length > 0 ? (sumG / studentSubjSubmitted.length).toFixed(1) : 'S/C';
 
                               return (
                                 <td key={subj} className="p-3 text-center bg-amber-50/40 border-l-2 border-amber-200">
                                   <div className="flex flex-col items-center">
                                     <span className={`font-black text-xs px-2.5 py-1 rounded-full shadow-sm ${
-                                      subjAvg >= 85 ? 'bg-emerald-600 text-white' : subjAvg >= 70 ? 'bg-amber-500 text-white' : 'bg-rose-600 text-white'
+                                      avgG !== 'S/C' && parseFloat(avgG) >= 8.5 
+                                        ? 'bg-emerald-600 text-white' 
+                                        : avgG !== 'S/C' && parseFloat(avgG) >= 7.0 
+                                        ? 'bg-amber-500 text-white' 
+                                        : avgG !== 'S/C'
+                                        ? 'bg-rose-600 text-white'
+                                        : 'bg-slate-200 text-slate-600'
                                     }`}>
-                                      {subjAvg}%
+                                      {avgG !== 'S/C' ? `Prom. ${avgG}` : 'Sin Nota'}
                                     </span>
                                     <span className="text-[10px] text-slate-500 font-semibold mt-1">
-                                      {studentSubjSubmitted} de {subjCount} tareas
+                                      {studentSubjSubmitted.length} de {subjCount} tareas
                                     </span>
                                   </div>
                                 </td>
@@ -1567,19 +1663,27 @@ export default function App() {
                             (() => {
                               const subjAssignments = assignments.filter(a => a.subject === selectedSubjectFilter);
                               const subjCount = subjAssignments.length || 1;
-                              const studentSubjSubmitted = subjAssignments.filter(a => (submissions[a.id] || []).includes(st.id)).length;
-                              const subjAvg = Math.round((studentSubjSubmitted / subjCount) * 100);
+                              const studentSubjSubmitted = subjAssignments.filter(a => (submissions[a.id] || []).includes(st.id));
+                              const subjGrades = studentSubjSubmitted.map(a => grades[a.id]?.[st.id] ?? 10);
+                              const sumG = subjGrades.reduce((acc, curr) => acc + curr, 0);
+                              const avgG = studentSubjSubmitted.length > 0 ? (sumG / studentSubjSubmitted.length).toFixed(1) : 'S/C';
 
                               return (
                                 <td className="p-3 text-center bg-amber-50/40 border-l-2 border-amber-200">
                                   <div className="flex flex-col items-center">
                                     <span className={`font-black text-xs px-2.5 py-1 rounded-full shadow-sm ${
-                                      subjAvg >= 85 ? 'bg-emerald-600 text-white' : subjAvg >= 70 ? 'bg-amber-500 text-white' : 'bg-rose-600 text-white'
+                                      avgG !== 'S/C' && parseFloat(avgG) >= 8.5 
+                                        ? 'bg-emerald-600 text-white' 
+                                        : avgG !== 'S/C' && parseFloat(avgG) >= 7.0 
+                                        ? 'bg-amber-500 text-white' 
+                                        : avgG !== 'S/C'
+                                        ? 'bg-rose-600 text-white'
+                                        : 'bg-slate-200 text-slate-600'
                                     }`}>
-                                      {subjAvg}%
+                                      {avgG !== 'S/C' ? `Prom. ${avgG}` : 'Sin Nota'}
                                     </span>
                                     <span className="text-[10px] text-slate-500 font-semibold mt-1">
-                                      {studentSubjSubmitted} de {subjCount} tareas
+                                      {studentSubjSubmitted.length} de {subjCount} tareas
                                     </span>
                                   </div>
                                 </td>
@@ -1587,20 +1691,35 @@ export default function App() {
                             })()
                           )}
 
-                          {/* Overall Average Column (When viewing ALL) */}
+                          {/* Overall Grade Average Column (When viewing ALL) */}
                           {selectedSubjectFilter === 'ALL' && (
-                            <td className="p-3 text-center bg-indigo-50/40 border-l-2 border-indigo-200">
-                              <div className="flex flex-col items-center">
-                                <span className={`font-black text-xs px-2.5 py-1 rounded-full shadow-sm ${
-                                  overallAvgPercentage >= 85 ? 'bg-emerald-600 text-white' : overallAvgPercentage >= 70 ? 'bg-amber-500 text-white' : 'bg-rose-600 text-white'
-                                }`}>
-                                  {overallAvgPercentage}%
-                                </span>
-                                <span className="text-[10px] text-slate-500 font-semibold mt-1">
-                                  {studentTotalGeneralSubmitted} de {totalGeneralAssignments} total
-                                </span>
-                              </div>
-                            </td>
+                            (() => {
+                              const submittedAssignments = assignments.filter(a => (submissions[a.id] || []).includes(st.id));
+                              const allGradesList = submittedAssignments.map(a => grades[a.id]?.[st.id] ?? 10);
+                              const totalSumG = allGradesList.reduce((acc, curr) => acc + curr, 0);
+                              const totalAvgG = submittedAssignments.length > 0 ? (totalSumG / submittedAssignments.length).toFixed(1) : 'S/C';
+
+                              return (
+                                <td className="p-3 text-center bg-indigo-50/40 border-l-2 border-indigo-200">
+                                  <div className="flex flex-col items-center">
+                                    <span className={`font-black text-xs px-2.5 py-1 rounded-full shadow-sm ${
+                                      totalAvgG !== 'S/C' && parseFloat(totalAvgG) >= 8.5 
+                                        ? 'bg-emerald-600 text-white' 
+                                        : totalAvgG !== 'S/C' && parseFloat(totalAvgG) >= 7.0 
+                                        ? 'bg-amber-500 text-white' 
+                                        : totalAvgG !== 'S/C'
+                                        ? 'bg-rose-600 text-white'
+                                        : 'bg-slate-200 text-slate-600'
+                                    }`}>
+                                      {totalAvgG !== 'S/C' ? `Prom. ${totalAvgG}` : 'Sin Nota'}
+                                    </span>
+                                    <span className="text-[10px] text-slate-500 font-semibold mt-1">
+                                      {submittedAssignments.length} de {assignments.length} total
+                                    </span>
+                                  </div>
+                                </td>
+                              );
+                            })()
                           )}
                         </tr>
                       );
@@ -2267,6 +2386,73 @@ export default function App() {
             >
               Cerrar
             </button>
+          </div>
+        </div>
+      )}
+
+      {/* Grade Editing Modal for Matrix Cell */}
+      {gradeModalCell && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl p-6 max-w-sm w-full shadow-2xl border border-slate-200 text-center animate-fadeIn">
+            <h3 className="text-base font-black text-slate-800 mb-1">Asignar Calificación</h3>
+            <p className="text-xs text-indigo-600 font-bold mb-1">{gradeModalCell.studentName}</p>
+            <p className="text-[11px] text-slate-500 mb-4">{gradeModalCell.taskTitle}</p>
+
+            <div className="grid grid-cols-3 gap-2 mb-4">
+              {[10, 9, 8, 7, 6, 5].map((g) => (
+                <button
+                  type="button"
+                  key={g}
+                  onClick={() => {
+                    setSubmissions(prev => ({
+                      ...prev,
+                      [gradeModalCell.assignmentId]: Array.from(new Set([...(prev[gradeModalCell.assignmentId] || []), gradeModalCell.studentId]))
+                    }));
+                    setGrades(prev => ({
+                      ...prev,
+                      [gradeModalCell.assignmentId]: {
+                        ...(prev[gradeModalCell.assignmentId] || {}),
+                        [gradeModalCell.studentId]: g
+                      }
+                    }));
+                    setGradeModalCell(null);
+                  }}
+                  className={`py-3 rounded-xl font-black text-sm text-white shadow-sm transition-transform hover:scale-105 ${
+                    g >= 9 ? 'bg-emerald-600 hover:bg-emerald-700' : g >= 7 ? 'bg-amber-500 hover:bg-amber-600' : 'bg-rose-600 hover:bg-rose-700'
+                  }`}
+                >
+                  Nota {g}
+                </button>
+              ))}
+            </div>
+
+            <div className="flex space-x-2 pt-2 border-t">
+              <button
+                type="button"
+                onClick={() => {
+                  setSubmissions(prev => ({
+                    ...prev,
+                    [gradeModalCell.assignmentId]: (prev[gradeModalCell.assignmentId] || []).filter(id => id !== gradeModalCell.studentId)
+                  }));
+                  setGrades(prev => {
+                    const copy = { ...(prev[gradeModalCell.assignmentId] || {}) };
+                    delete copy[gradeModalCell.studentId];
+                    return { ...prev, [gradeModalCell.assignmentId]: copy };
+                  });
+                  setGradeModalCell(null);
+                }}
+                className="flex-1 py-2 rounded-xl bg-rose-50 text-rose-700 font-bold text-xs hover:bg-rose-100 border border-rose-200"
+              >
+                Quitar (Pendiente)
+              </button>
+              <button
+                type="button"
+                onClick={() => setGradeModalCell(null)}
+                className="px-4 py-2 rounded-xl bg-slate-200 text-slate-700 font-bold text-xs"
+              >
+                Cancelar
+              </button>
+            </div>
           </div>
         </div>
       )}
