@@ -286,7 +286,15 @@ export default function App() {
 
   useEffect(() => {
     try {
-      if ((window as any).require) {
+      if ((window as any).electronAPI) {
+        (window as any).electronAPI.getLocalIp().then((ip: string) => setLocalIp(ip));
+        const cleanup = (window as any).electronAPI.onQrScanned((data: string) => {
+          if (handleCodeScannedRef.current) {
+            handleCodeScannedRef.current(data);
+          }
+        });
+        return cleanup;
+      } else if ((window as any).require) {
         const { ipcRenderer } = (window as any).require('electron');
         ipcRenderer.invoke('get-local-ip').then((ip: string) => setLocalIp(ip));
         
