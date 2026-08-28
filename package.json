@@ -36,6 +36,9 @@
     "productName": "Control Asistencia y Trabajos QR",
     "electronVersion": "33.2.1",
     "asar": false,
+    "directories": {
+      "output": "dist-electron"
+    },
     "files": [
       "dist/**/*",
       "electron/**/*"

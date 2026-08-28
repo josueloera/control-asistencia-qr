@@ -38,7 +38,7 @@ jobs:
         draft: false
         prerelease: true
         files: |
-          dist/*.dmg
+          dist-electron/*.dmg
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -69,6 +69,6 @@ jobs:
         draft: false
         prerelease: true
         files: |
-          dist/*.exe
+          dist-electron/*.exe
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
